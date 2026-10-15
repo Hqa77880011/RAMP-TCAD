@@ -1,0 +1,13 @@
+{
+  "technology": "SiC",
+  "fidelities": ["coarse", "medium", "fine"],
+  "lower": [0, 0],
+  "upper": [1, 1],
+  "objective_lower": [0, 0],
+  "objective_upper": [1, 1],
+  "reference": [1.1, 1.1],
+  "risk": 0.05,
+  "boundary_weight": 0.05,
+  "mc_samples": 64,
+  "transfer_temperature": 1
+}
