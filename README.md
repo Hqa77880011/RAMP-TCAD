@@ -2,16 +2,19 @@
 
 Implementation of **Risk-aware multi-fidelity optimization for technology computer-aided design of wide-bandgap and gate-all-around devices**.
 
-The optimizer separates device responses, numerical completion, and censored runtime. Paired low/high evaluations learn source discrepancies. Corrected auxiliary responses feed high-fidelity Gaussian processes with discrepancy-dependent observation variance. Acquisition divides completion- and reliability-weighted safe hypervolume improvement plus boundary uncertainty by expected termination/recovery cost. An optional dimensionless descriptor model shares information through a held-out local risk gate.
+## Installation
 
-## Install and supply simulation records
+Use Python 3.11+. Create and activate a virtual environment before installing:
 
 ```bash
 python -m venv .venv
+source .venv/bin/activate
 python -m pip install -e .
 ```
 
-Python 3.11+ is required. Device simulations are supplied by a licensed TCAD solver or an existing measured campaign. Mesh, transport/quantum models, tolerances, device geometry, and physical constraint definitions belong to that solver configuration. No random-noise substitute is presented as a different fidelity.
+In PowerShell, replace the activation line with `.venv\Scripts\Activate.ps1`.
+
+## Data and preprocessing
 
 Create `campaign.json`, a JSON list with one entry per design/fidelity evaluation. Required fields are `id`, `technology`, `x`, `fidelity`, `completed`, `runtime`, `recovery`, and `initial`. Successful records additionally contain `objectives` and `constraints`; failed records need neither response. `runtime` is compute exposure until termination, `recovery` the additional measured recovery exposure, and optional `censored: true` denotes timeout/right censoring. Use one common high-fidelity-equivalent unit for all cost fields. Constraint values are feasible at or below zero, and all objectives use minimization, so negate breakdown voltage/on-current when maximizing them.
 
@@ -21,31 +24,24 @@ Optional `descriptor` arrays contain physically meaningful dimensionless quantit
 
 Edit `config.json` to register design bounds, objective normalization, target technology, ordered fidelities, hypervolume reference, safe-launch risk, boundary weight, and Monte Carlo count. The supplied unit bounds illustrate schema; replace them with actual device definitions before optimization. Fix objective normalization and hypervolume reference before comparing campaigns.
 
-## Run replay and comparisons
+## Run and evaluate
 
 ```bash
 ramp-tcad --data campaign.json --config config.json --budget 100 --output outputs/full --seed 0
-ramp-tcad --data campaign.json --config config.json --budget 100 --output outputs/hf --variant hf --seed 0
-ramp-tcad --data campaign.json --config config.json --budget 100 --output outputs/mfbo --variant mfbo --seed 0
-ramp-tcad --data campaign.json --config config.json --budget 100 --output outputs/no_failure --variant no_failure
-ramp-tcad --data campaign.json --config config.json --budget 100 --output outputs/no_boundary --variant no_boundary
-ramp-tcad --data campaign.json --config config.json --budget 100 --output outputs/no_reliability --variant no_reliability
-ramp-tcad --data campaign.json --config config.json --budget 100 --output outputs/no_transfer --variant no_transfer
-ramp-tcad --data campaign.json --config config.json --budget 100 --output outputs/raw_sharing --variant raw_sharing
 ```
 
-This command performs finite-candidate sequential replay of real precomputed TCAD records. Each selection sees only candidate coordinates, fidelity, technology, and descriptors. After selection, that record's actual response, completion, and cost are revealed. No simulator process is launched. The same `Surrogate.choose` method accepts a live candidate list; append the solver's completed or failed record before constructing the next surrogate to use it in an external TCAD campaign.
+## Ablations
 
-`hf` uses only high-fidelity response fitting and launches, `mfbo` removes completion and local reliability discounting, and other variants remove the named mechanism. `raw_sharing` sets the sharing gate to one. Comparisons use the same seed records and compute cap. This implementation evaluates one candidate per step: Monte Carlo independent-objective EHVI is the `q=1` case. No result is labeled NSGA-II or SafeOpt without those distinct algorithms.
+Supported controls: `hf`, `mfbo`, `no_failure`, `no_boundary`, `no_reliability`, `no_transfer`, `raw_sharing`. Reuse the same inputs, seed and budget. For retrained controls, evaluate the corresponding saved model.
 
-The censored runtime model is a ridge-regularized lognormal accelerated-failure-time fit. Completion uses logistic regression when both outcomes are observed; otherwise it uses the observed constant rate. Source reliability decays with local discrepancy magnitude and uncertainty relative to posterior response uncertainty. Boundary utility is posterior constraint standard deviation times density near zero. High-fidelity launches require every modeled constraint's posterior violation probability to pass the configured limit; no unsafe boundary exception is enabled. Empty safe acquisition sets stop with an explicit error so the seed design or launch rule can be reconsidered.
+```bash
+ramp-tcad --data campaign.json --config config.json --budget 100 --output outputs/hf --seed 0 --variant hf
+```
 
-## Results
+## Outputs
 
-`history.json` records measured cost and the safe-front trajectory. `acquisition.json` retains every evaluated candidate's allocation score, completion, reliability, expected cost, feasibility, and transfer gate. `observed.json` contains only revealed simulation records. `metrics.json` includes normalized safe hypervolume, safe hypervolume regret, physical high-fidelity violation rate, failed-run/recovery exposure, total compute, boundary Brier/ECE, and allocation overhead. `front_progress.png` plots safe hypervolume against compute.
+`history.json`, `acquisition.json`, `observed.json`, `metrics.json` and `front_progress.png` retain revealed campaign records, allocation/cost history and safe-front summaries. The command replays supplied TCAD records; it does not launch a TCAD solver.
 
-Normalization and safe regret use the feasible high-fidelity front of the supplied finite campaign as an evaluation reference; this retrospective front is never supplied to acquisition. It is not the unknown continuous-domain optimum. Failed simulations have no fabricated objectives and update only operational models. Transfer benefit/loss is obtained by paired differences in final safe hypervolume between full/no-transfer/raw-sharing runs; a negative full-minus-no-transfer difference is negative transfer. Repeat both device campaigns and seeds before calculating that rate. Solver runtime and optimization overhead have separate units unless converted by a declared hardware accounting rule. No campaign results are bundled.
+Keep `config.json` with the run; it contains model/data settings and the seed where the CLI does not expose one. Use separate output directories for different seeds/conditions.
 
-## Reproduction logic conventions
-
-Boundary Brier/ECE compare target high-fidelity predictions only with completed target-technology high-fidelity responses. Auxiliary-fidelity outcomes are not high-fidelity calibration labels. Physical-violation accounting likewise excludes seed records from other technologies.
+Source inspection: Python 3.13.5, numpy 2.1.3, scipy 1.15.3, scikit-learn 1.6.1, matplotlib 3.10.0 (installed versions inspected). Checks covered Python syntax, configuration parsing and CLI arguments. No training, full evaluation or CI was run in this update.
