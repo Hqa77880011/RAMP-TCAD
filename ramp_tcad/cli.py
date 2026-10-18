@@ -224,15 +224,15 @@ def run(args):
         safe = [r for r in observed if r['completed'] and r['fidelity'] == high and r['technology'] == config['technology'] and max(r['constraints'], default=-1) <= 0]
         hv = hypervolume(np.array([(np.array(r['objectives']) - lo) / (hi - lo) for r in safe]).reshape(-1, m), reference)
         record = {'cost': cost, 'safe_hypervolume': hv, 'normalized_safe_hypervolume': hv / oracle_hv if oracle_hv > 0 else None,
-                  'safe_regret': oracle_hv - hv, 'selected': selected['id'], 'completed': selected['completed'],
+                  'safe_regret': oracle_hv - hv, 'selected': selected['id'], 'completed': selected['completed'], 'fidelity': selected['fidelity'],
                   'predicted_constraint_safety': ndtr(-mean[0, m:] / std[0, m:]).tolist(),
                   'constraint_safety': (np.array(selected['constraints']) <= 0).tolist() if selected['completed'] else None}
         history.append(record)
         traces.append(acquisition)
-    completed = [r for r in observed if r['completed'] and r['fidelity'] == high]
+    completed = [r for r in observed if r['completed'] and r['fidelity'] == high and r['technology'] == config['technology']]
     probabilities, labels = [], []
     for item in history:
-        if item['constraint_safety'] is not None:
+        if item['fidelity'] == high and item['constraint_safety'] is not None:
             probabilities.extend(item['predicted_constraint_safety'])
             labels.extend(item['constraint_safety'])
     ece = 0.
