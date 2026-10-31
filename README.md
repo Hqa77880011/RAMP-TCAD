@@ -44,4 +44,15 @@ ramp-tcad --data campaign.json --config config.json --budget 100 --output output
 
 Keep `config.json` with the run; it contains model/data settings and the seed where the CLI does not expose one. Use separate output directories for different seeds/conditions.
 
-Source inspection: Python 3.13.5, numpy 2.1.3, scipy 1.15.3, scikit-learn 1.6.1, matplotlib 3.10.0 (installed versions inspected). Checks covered Python syntax, configuration parsing and CLI arguments. No training, full evaluation or CI was run in this update.
+## Implementation and functional validation
+
+This update reuses the existing record-replay optimizer and fixes calibration bins so probabilities exactly on decile boundaries are counted once. The paper directory contains table/plot synchronization scripts, not the original solver campaign or decks. Replayed functional fixtures are not physical TCAD results.
+
+| Paper module / metric | Entry | Command / output |
+| --- | --- | --- |
+| Objective/constraint GP, fidelity discrepancies, completion/runtime | `Surrogate` | `ramp-tcad ...` |
+| Safe-front, completion/reliability/boundary acquisition | `Surrogate.choose`, `run` | `acquisition.json`, `observed.json` |
+| Hypervolume/regret/exposure and Brier/ECE | `hypervolume`, `calibration_errors`, `run` | `metrics.json`, `history.json` |
+| Functional validation | `smoke.py` | `python smoke.py` |
+
+CPU check: Python 3.13.5, NumPy 2.1.3 / SciPy 1.15.3 / scikit-learn 1.6.1, seed 0 and BLAS threads 1. The synthetic campaign checks hand-computed Pareto hypervolume and disjoint-bin Brier/ECE, GP fitting and JSON-reconstruction prediction equality, failed/right-censored cost exposure, hidden candidate responses, budget-limited replay and full/HF/no-failure controls. This is sequential finite-candidate Monte Carlo EHVI replay with independent outputs. Batch qEHVI/fantasies, Sobol/live solver candidate launch, the complete NSGA-II/SafeOpt baseline suite and original device-response mappings remain outside the implemented scope. Original SiC/GAAFET campaign performance is unverified.

@@ -190,6 +190,18 @@ class Surrogate:
         return int(np.argmax(acquisition)), traces
 
 
+
+def calibration_errors(probabilities, labels):
+    """Brier and ten-bin ECE with disjoint bins, including confidence one."""
+    probabilities, labels = np.asarray(probabilities), np.asarray(labels)
+    if not len(probabilities):
+        return None, None
+    bins = np.minimum((10 * probabilities).astype(int), 9)
+    ece = sum(np.mean(bins == index) * abs(probabilities[bins == index].mean() - labels[bins == index].mean())
+              for index in range(10) if np.any(bins == index))
+    return float(np.mean((probabilities - labels) ** 2)), float(ece)
+
+
 def run(args):
     config = json.loads(Path(args.config).read_text())
     rows = json.loads(Path(args.data).read_text())
@@ -235,18 +247,12 @@ def run(args):
         if item['fidelity'] == high and item['constraint_safety'] is not None:
             probabilities.extend(item['predicted_constraint_safety'])
             labels.extend(item['constraint_safety'])
-    ece = 0.
-    if probabilities:
-        probabilities, labels = np.array(probabilities), np.array(labels)
-        for low in np.arange(0, 1, .1):
-            selected = (probabilities >= low) & (probabilities < low + .1 + 1e-12)
-            if selected.any():
-                ece += selected.mean() * abs(probabilities[selected].mean() - labels[selected].mean())
+    brier, ece = calibration_errors(probabilities, labels)
     result = {'final': history[-1] if history else None, 'compute_cost': cost,
               'failure_exposure': sum(r['runtime'] + r.get('recovery', 0.) for r in observed if not r['completed']),
               'physical_violation_rate': float(np.mean([max(r['constraints'], default=-1) > 0 for r in completed])) if completed else None,
-              'boundary_brier': float(np.mean((probabilities - labels) ** 2)) if len(probabilities) else None,
-              'boundary_ece': float(ece), 'allocation_overhead_seconds': time.perf_counter() - begin}
+              'boundary_brier': brier,
+              'boundary_ece': ece, 'allocation_overhead_seconds': time.perf_counter() - begin}
     out = Path(args.output)
     out.mkdir(parents=True, exist_ok=True)
     for name, value in [('history', history), ('acquisition', traces), ('metrics', result), ('observed', observed)]:
