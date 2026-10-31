@@ -14,3 +14,6 @@ ramp-tcad = "ramp_tcad.cli:main"
 
 [tool.setuptools.packages.find]
 include = ["ramp_tcad*"]
+
+[project.optional-dependencies]
+advanced = ["botorch>=0.18,<0.19", "pymoo>=0.6.2,<0.7"]

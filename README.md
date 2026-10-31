@@ -40,7 +40,7 @@ ramp-tcad --data campaign.json --config config.json --budget 100 --output output
 
 ## Outputs
 
-`history.json`, `acquisition.json`, `observed.json`, `metrics.json` and `front_progress.png` retain revealed campaign records, allocation/cost history and safe-front summaries. The command replays supplied TCAD records; it does not launch a TCAD solver.
+`history.json`, `acquisition.json`, `observed.json`, `metrics.json` and `front_progress.png` retain revealed campaign records, allocation/cost history and safe-front summaries. The basic command replays supplied TCAD records. The explicit `advanced live` entry below launches a registered solver adapter.
 
 Keep `config.json` with the run; it contains model/data settings and the seed where the CLI does not expose one. Use separate output directories for different seeds/conditions.
 
@@ -55,4 +55,49 @@ This update reuses the existing record-replay optimizer and fixes calibration bi
 | Hypervolume/regret/exposure and Brier/ECE | `hypervolume`, `calibration_errors`, `run` | `metrics.json`, `history.json` |
 | Functional validation | `smoke.py` | `python smoke.py` |
 
-CPU check: Python 3.13.5, NumPy 2.1.3 / SciPy 1.15.3 / scikit-learn 1.6.1, seed 0 and BLAS threads 1. The synthetic campaign checks hand-computed Pareto hypervolume and disjoint-bin Brier/ECE, GP fitting and JSON-reconstruction prediction equality, failed/right-censored cost exposure, hidden candidate responses, budget-limited replay and full/HF/no-failure controls. This is sequential finite-candidate Monte Carlo EHVI replay with independent outputs. Batch qEHVI/fantasies, Sobol/live solver candidate launch, the complete NSGA-II/SafeOpt baseline suite and original device-response mappings remain outside the implemented scope. Original SiC/GAAFET campaign performance is unverified.
+CPU check: Python 3.13.5, NumPy 2.1.3 / SciPy 1.15.3 / scikit-learn 1.6.1, seed 0 and BLAS threads 1. The synthetic campaign checks hand-computed Pareto hypervolume and disjoint-bin Brier/ECE, GP fitting and JSON-reconstruction prediction equality, failed/right-censored cost exposure, hidden candidate responses, budget-limited replay and full/HF/no-failure controls. This is sequential finite-candidate Monte Carlo EHVI replay with independent outputs. The batch/fantasy/live and comparison entries below extend this replay protocol. Original device-response mappings must be registered from the physical device study. Original SiC/GAAFET campaign performance is unverified.
+
+## Joint batches, fantasies, Sobol and live workers
+
+```bash
+python -m pip install -e ".[advanced]"
+python -m ramp_tcad.advanced replay --data campaign.json --config config.json --method qehvi --batch-size 2 --budget 100 --output outputs/batch --seed 0
+python -m ramp_tcad.advanced replay --data campaign.json --config config.json --method nsga2 --batch-size 2 --budget 100 --output outputs/nsga2 --seed 0
+python -m ramp_tcad.advanced replay --data campaign.json --config config.json --method safeopt --batch-size 2 --budget 100 --output outputs/safeopt --seed 0
+```
+
+Register `seconds_per_hf` (measured seconds per common high-fidelity-equivalent unit) in the config for these entries. They charge measured surrogate/acquisition overhead as well as worker termination/recovery, never reveal outcomes until the **whole batch is selected**, and retain `batch_plans.json`. The allocator can consume the last remaining exposure; no new worker starts after it exhausts the budget. Recorded allocator time remains the actual time, including any terminal overshoot.
+
+[BoTorch qExpectedHypervolumeImprovement](https://botorch.readthedocs.io/en/stable/acquisition.html#botorch.acquisition.multi_objective.monte_carlo.qExpectedHypervolumeImprovement) evaluates joint feasible hypervolume improvement with Sobol posterior sampling (`--mc-samples 64`). The corrected/shared GP marginal means and variances come from the existing surrogate. A positive semidefinite cross-candidate covariance uses the fitted independent GP correlation rescaled to those marginals; outputs remain independent. This is an explicit covariance convention where the manuscript does not prescribe one. Candidate batches are enumerated up to `--max-batches 128`, or a seeded random subset of combinations is scored. Batch completion is the product of per-worker completion probabilities, reliability their mean, cost their sum, and boundary value the sum of marginal boundary uncertainties. These batch aggregation conventions are configurable through batch size and the existing boundary coefficient.
+
+`--pending pending.json` accepts metadata for already launched, unresolved runs. Their joint posterior outcomes are sampled (`--fantasies 4`), each draw **conditions** the remaining Gaussian posterior and updates the feasible fantasy frontier, and joint qEHVI is averaged across those scenarios. It does not insert fake completed responses into the campaign. Hypothetical observations use `fantasy_noise=1e-6` by default in normalized output coordinates.
+
+[NSGA-II from pymoo](https://pymoo.org/algorithms/moo/nsga2.html) uses its actual ask/tell evolutionary algorithm, initialized with the shared completed high-fidelity seeds. Offspring are projected to the nearest unseen high-fidelity candidate in a replay catalog; live catalogs use Sobol candidates. Only revealed evaluations enter tell. A noncompleted offspring gets an **optimizer-only** worst-objective penalty (`objective_upper + objective_span`) and positive constraint penalty 1; its physical record continues to have no objectives/constraints. [SafeOpt](https://proceedings.mlr.press/v37/sui15.html) is a finite-domain implementation with confidence-certified constraints, potential minimizers and Lipschitz safe-set expanders. It uses equal normalized objective weights, beta 2 and Lipschitz constant 1 by default (`safeopt_weights`, `safeopt_beta`, `safeopt_lipschitz` in config). These declared multi-objective scalarization/domain choices are not claimed author TCAD parameters or a transferred theoretical guarantee.
+
+For a live campaign, add an explicit solver configuration, replacing paths and physical bounds with the registered simulator adapter:
+
+```json
+{
+  "seconds_per_hf": 100.0,
+  "constraint_scale": [1.0],
+  "solver": {
+    "argv": ["python", "/absolute/path/to/adapter.py", "--request", "{request}", "--response", "{response}"],
+    "timeout_seconds": 3600
+  }
+}
+```
+
+```bash
+python -m ramp_tcad.advanced live --data seed_campaign.json --config device_config.json --method qehvi --candidates 32 --batch-size 2 --budget 100 --output outputs/live --seed 0
+```
+
+Each iteration draws scrambled Sobol physical designs within registered bounds and enumerates fidelities. Optional `descriptor_indices`, `descriptor_offset`, `descriptor_scale` define a registered dimensionless descriptor mapping; no raw cross-device mapping is inferred. The launcher uses an argument list with `shell=False`, a separate numbered work directory, explicit request/result JSON and stdout/stderr. The adapter must return `{"completed":true,"objectives":[...],"constraints":[...]}` with registered finite response dimensions; failed runs return `completed:false` or a nonzero exit code. The timeout is the smaller of the registered worker limit and remaining campaign exposure. It terminates only the owned worker process tree, records measured right-censored runtime, and never invents a device response. All live high-fidelity methods enforce the existing posterior chance constraint before launch. Any actual recovery work must be recorded by the campaign operator; the generic adapter does not execute unspecified recovery commands.
+
+`examples/toy_solver.py` is a clearly labeled analytic **schema fixture**, not a TCAD simulator. It enables a reproducible process-level check without a proprietary simulator:
+
+```bash
+python smoke.py
+python smoke_advanced.py
+```
+
+Both checks passed locally on CPU threads 1 with BoTorch 0.18.1/pymoo 0.6.2. The advanced check verifies joint q=2 acquisition, posterior mean/variance correspondence, genuine conditioning and fantasy score changes, Sobol bounds/fidelities, NSGA-II/SafeOpt replay, hidden responses, measured exposure accounting, actual isolated worker responses and an owned-worker timeout. CI repeats them. SiC/GAAFET solver executables, calibrated decks, physical mappings and original campaign logs are not available in this repository, so a real device launch and paper performance remain blocked on those inputs.
